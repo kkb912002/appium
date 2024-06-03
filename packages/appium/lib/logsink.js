@@ -284,8 +284,8 @@ async function init(args) {
     if (prefix) {
       const decoratedPrefix = `[${prefix}]`;
       const toColorizedDecoratedPrefix = () => prefix === APPIUM_LOGGER_NAME
-          ? decoratedPrefix.magenta
-          : getColorizedPrefix(decoratedPrefix);
+        ? decoratedPrefix.magenta
+        : getColorizedPrefix(decoratedPrefix);
       header += args.logNoColors ? decoratedPrefix : toColorizedDecoratedPrefix();
     }
 
