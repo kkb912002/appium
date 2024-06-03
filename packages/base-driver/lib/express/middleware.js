@@ -1,3 +1,4 @@
+import {util} from '@appium/support';
 import _ from 'lodash';
 import log from './logger';
 import {errors} from '../protocol';
@@ -169,4 +170,18 @@ function patchWithSessionId(req, body) {
   return body;
 }
 
-export { handleIdempotency };
+export function addLogContext(req, res, next) {
+  const contextStorage = global._global_log_context;
+  if (contextStorage) {
+    const match = SESSION_ID_PATTERN.exec(req.url);
+    const context = {
+      // probably be replaced with the idempotency key.
+      request: util.uuidV4(),
+      ...(match && {session: match[1]}),
+    };
+    contextStorage.enterWith(context);
+  }
+  next();
+}
+
+export {handleIdempotency};

@@ -16,6 +16,7 @@ import {
   handleIdempotency,
   handleUpgrade,
   catch404Handler,
+  addLogContext,
 } from './middleware';
 import {guineaPig, guineaPigScrollable, guineaPigAppBanner, welcome, STATIC_DIR} from './static';
 import {produceError, produceCrash} from './crash';
@@ -144,6 +145,12 @@ function configureServer({
   webSocketsMapping = {},
 }) {
   basePath = normalizeBasePath(basePath);
+
+  // opts.logContext
+  let opts_logContext = true;
+  if (opts_logContext) {
+    app.use(addLogContext);
+  }
 
   app.use(endLogFormatter);
 
