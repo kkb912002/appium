@@ -275,6 +275,18 @@ export class BaseDriver<
     this.validateDesiredCaps(caps);
 
     this.sessionId = util.uuidV4();
+
+    // this.cliArgs.logContext
+    const this_cliArgs_logContext = true;
+    if (this_cliArgs_logContext) {
+      const contextStorage = global._global_log_context;
+      if (contextStorage) {
+          const context = contextStorage.getStore() ?? {};
+          context.session = this.sessionId;
+          contextStorage.enterWith(context);
+      }
+    }
+
     this.caps = caps;
     // merge caps onto opts so we don't need to worry about what's where
     this.opts = {..._.cloneDeep(this.initialOpts), ...this.caps};
