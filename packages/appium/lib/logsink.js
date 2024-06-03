@@ -1,12 +1,15 @@
+import {AsyncLocalStorage} from 'async_hooks';
 import npmlog from 'npmlog';
 import {createLogger, format, transports} from 'winston';
 import {fs, logger} from '@appium/support';
 import { APPIUM_LOGGER_NAME } from './logger';
+import LRUCache from 'lru-cache';
 import _ from 'lodash';
 
 // set up distributed logging before everything else
 logger.patchLogger(npmlog);
 global._global_npmlog = npmlog;
+global._global_log_context = new AsyncLocalStorage();
 
 // npmlog is used only for emitting, we use winston for output
 npmlog.level = 'info';
@@ -34,7 +37,13 @@ const npmToWinstonLevels = {
   error: 'error',
 };
 
-const encounteredPrefixes = [];
+/** @type {Map<string, number>} */
+const prefixColorMap = new Map();
+
+/** @type {LRUCache<string, number>} */
+const sessionColorCache = new LRUCache({
+  ttl: 24 * 60 * 60 * 1000,
+});
 
 let log = null;
 let useLocalTimeZone = false;
@@ -185,17 +194,60 @@ async function createTransports(args) {
   return transports;
 }
 
+/**
+ * @param {string} text
+ * @param {number} colorNumber 0-255
+ * @returns {string}
+ */
+function colorizeText(text, colorNumber) {
+  return `\x1b[38;5;${colorNumber}m${text}\x1b[0m`;
+}
+
+/**
+ * @param {string} prefix
+ * @returns {string}
+ */
 function getColorizedPrefix(prefix) {
   let prefixId = prefix.split('@')[0].trim();
   prefixId = prefixId.split(' (')[0].trim();
-  if (encounteredPrefixes.indexOf(prefixId) < 0) {
-    encounteredPrefixes.push(prefixId);
+  let colorNumber = prefixColorMap.get(prefixId);
+  if (!_.isNumber(colorNumber)) {
+    // using a multiple of 16 should cause 16 colors to be created
+    colorNumber = (prefixColorMap.size * 16) % 256;
+    prefixColorMap.set(prefixId, colorNumber);
   }
-  // using a multiple of 16 should cause 16 colors to be created
-  const colorNumber = encounteredPrefixes.indexOf(prefixId) * 16;
   // use the modulus to cycle around color wheel
-  return `\x1b[38;5;${colorNumber % 256}m${prefix}\x1b[0m`;
+  return colorizeText(prefix, colorNumber);
 }
+
+/**
+ * @param {string} session
+ * @param {boolean} noColor
+ * @returns {string}
+ */
+const getFormattedSession = (() => {
+  let idx = 0;
+  /**
+   * @param {string} session
+   * @param {boolean} noColor
+   * @returns {string}
+   */
+  return (session, noColor) => {
+    let stripped = `[${session.substring(0, 8)}]`;
+
+    if (noColor) {
+      return stripped;
+    }
+
+    let colorNumber = sessionColorCache.get(session);
+    if (!_.isNumber(colorNumber)) {
+      colorNumber = (idx++ * 16 + 8) % 256;
+      sessionColorCache.set(session, colorNumber);
+    }
+
+    return colorizeText(stripped, colorNumber);
+  };
+})();
 
 async function init(args) {
   npmlog.level = 'silent';
@@ -217,14 +269,27 @@ async function init(args) {
   // Capture logs emitted via npmlog and pass them through winston
   npmlog.on('log', ({level, message, prefix}) => {
     const winstonLevel = npmToWinstonLevels[level] || 'info';
-    let msg = message;
+    let header = '';
+    // args.logContext
+    let args_logContext = true;
+    if (args_logContext) {
+      const contextStorage = global._global_log_context;
+      if (contextStorage) {
+        const {request: r, session: s} = contextStorage.getStore() ?? {};
+        const r_short = r ? `[${r?.substring(0, 8)}]` : '';
+        const s_short = s ? getFormattedSession(s, args.logNoColors) : '';
+        header += r && s ? r_short + s_short : r ? r_short : '';
+      }
+    }
     if (prefix) {
       const decoratedPrefix = `[${prefix}]`;
       const toColorizedDecoratedPrefix = () => prefix === APPIUM_LOGGER_NAME
         ? decoratedPrefix.magenta
         : getColorizedPrefix(decoratedPrefix);
-      msg = `${args.logNoColors ? decoratedPrefix : toColorizedDecoratedPrefix()} ${msg}`;
+      header += args.logNoColors ? decoratedPrefix : toColorizedDecoratedPrefix();
     }
+
+    const msg = header ? `${header} ${message}` : message;
     try {
       log[winstonLevel](msg);
       if (_.isFunction(args.logHandler)) {
